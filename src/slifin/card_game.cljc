@@ -7,4 +7,4 @@
   (declare-depot setup *player-depot :random)
 
   (let [s (stream-topology topologies "cards-topology")]
-    (declare-pstate s $$players {Long (fixed-schema)})))
+    (declare-pstate s $$players {Long (fixed-keys-schema {:name String})})))
