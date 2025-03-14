@@ -1,0 +1,5 @@
+{:deps {com.rpl/rama-helpers {:mvn/version "0.10.0"}
+        org.clojure/clojure {:mvn/version "1.11.1"}}
+ :mvn/repos {"maven-releases" {:url "https://nexus.redplanetlabs.com/repository/maven-public-releases"}}
+ :aliases {:dev {:extra-paths ["test/resources"]}
+           :provided {:extra-deps {com.rpl/rama {:mvn/version "0.22.0"}}}}}
