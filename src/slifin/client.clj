@@ -1,5 +1,6 @@
 (ns slifin.client
-  (:require [com.rpl.rama :as r :refer :all]))
+  (:require [com.rpl.rama :as r :refer :all]
+            [com.rpl.rama.test :as rtest]))
 
 (def MODULE "slifin.card-game/CardGameModule")
 
@@ -20,8 +21,20 @@
                    {:op :create-deck :player-id player-id :deck-id deck-id :name name :ts ts}))
 
 (defn get-player [mgr player-id]
-  (first (foreign-invoke-query (qtop mgr "get-player") player-id)))
+  (foreign-invoke-query (qtop mgr "get-player") player-id))
 
 (defn list-deck-ids [mgr player-id]
-  (first (foreign-invoke-query (qtop mgr "list-deck-ids") player-id)))
+  (foreign-invoke-query (qtop mgr "list-deck-ids") player-id))
 
+(defn list-decks [mgr player-id]
+  (foreign-invoke-query (qtop mgr "list-decks") player-id))
+
+
+(comment
+  (with-open [ipc (rtest/create-ipc)]
+    (rtest/launch-module! ipc slifin.card-game/CardGameModule {:tasks 4 :threads 2})
+    (create-player! ipc {:player-id 1 :name "Adrian" :ts nil})
+    (create-deck! ipc {:player-id 1 :deck-id 1001 :name "Main" :ts nil})
+    (Thread/sleep 200)
+    (println :player (get-player ipc 1))
+    (println :deck (list-decks ipc 1))))

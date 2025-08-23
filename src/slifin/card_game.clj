@@ -1,15 +1,18 @@
 (ns slifin.card-game
   (:require
     [com.rpl.rama :refer :all]
-    [com.rpl.rama.path :refer [keypath termval]]
+    [com.rpl.rama.path :refer [ALL keypath termval nil->val]]
     [com.rpl.rama.aggs :as aggs]))
 
-(defmodule CardGameModule [setup topologies]
+;; wrap interop for use in dataflow
+(defn now-ts [] (System/currentTimeMillis))
+
+(defmodule CardGameModule
+  [setup topologies]
   ;; Depots
   (declare-depot setup *player-cmds (hash-by :player-id))
-  (declare-depot setup *deck-cmds   (hash-by :player-id))
+  (declare-depot setup *deck-cmds (hash-by :player-id))
 
-  ;; Stream topology block
   (let [s (stream-topology topologies "core")]
     ;; PStates
     (declare-pstate s $$players
@@ -21,34 +24,66 @@
 
     ;; ETL / sources
     (<<sources s
-      (source> *player-cmds :> {:keys [*op *player-id *name *ts]})
-      (|hash *player-id)
+      ;; players
+      (source> *player-cmds :> *pcmd)
+      (select> [(keypath :op)] *pcmd :> *op)
+      (select> [(keypath :player-id)] *pcmd :> *player-id)
+      (select> [(keypath :name)] *pcmd :> *name)
+      (select> [(keypath :ts)] *pcmd :> *ts)
+      (<<shadowif *ts nil? (now-ts))
       (<<switch *op
                 (case> :create-player)
+                (|hash *player-id)
                 (local-transform> [(keypath *player-id)
-                                   (termval {:name *name
-                                             :created-at (or *ts (System/currentTimeMillis))})]
+                                   (termval {:name       *name
+                                             :created-at *ts})]
                   $$players))
 
-      (source> *deck-cmds :> {:keys [*op *player-id *deck-id *name *ts]})
-      (|hash *player-id)
-      (<<switch *op
+      ;; decks
+      (source> *deck-cmds :> *dcmd)
+      (select> [(keypath :op)] *dcmd :> *dop)
+      (select> [(keypath :player-id)] *dcmd :> *player-id)
+      (select> [(keypath :deck-id)] *dcmd :> *deck-id)
+      (select> [(keypath :name)] *dcmd :> *name)
+      (select> [(keypath :ts)] *dcmd :> *ts)
+      (<<shadowif *ts nil? (now-ts))
+      (<<switch *dop
                 (case> :create-deck)
+                (|hash *deck-id)
                 (local-transform> [(keypath *deck-id)
-                                   (termval {:player-id *player-id
-                                             :name *name
-                                             :created-at (or *ts (System/currentTimeMillis))})]
+                                   (termval {:player-id  *player-id
+                                             :name       *name
+                                             :created-at *ts})]
                   $$decks)
-                (+compound $$player-decks
-                           {*player-id (aggs/+set-agg *deck-id)})))
 
-    ;; Queries can remain outside the let
-    (<<query-topology topologies "get-player" [*player-id]
-      (|hash$$ $$players *player-id)
-      (local-select> [(keypath *player-id)] $$players :> *profile)
-      (:> *profile))
+                (|hash *player-id)
+                (+compound $$player-decks {*player-id (aggs/+set-agg *deck-id)}))))
 
-    (<<query-topology topologies "list-deck-ids" [*player-id]
-      (|hash$$ $$player-decks *player-id)
-      (local-select> [(keypath *player-id)] $$player-decks :> *ids)
-      (:> *ids)))))
+
+  (<<query-topology topologies "get-player" [*player-id :> *player]
+    (|hash *player-id)
+    (local-select> [(keypath *player-id) (nil->val nil)] $$players :> *player)
+    (|origin))
+
+  (<<query-topology topologies "list-deck-ids" [*player-id :> *deck-ids]
+    (|hash *player-id)
+    (local-select> [(keypath *player-id) ALL] $$player-decks :> *deck-id)
+    (|origin)
+    (aggs/+set-agg *deck-id :> *deck-ids))
+
+  (<<query-topology topologies "list-decks" [*player-id :> *decks]
+    ;; PRE-AGG: start on the player’s shard
+    (|hash *player-id)
+    (local-select> [(keypath *player-id) ALL] $$player-decks :> *deck-id)
+
+    ;; hop to the deck’s shard to read the deck row
+    (|hash *deck-id)
+    (local-select> [(keypath *deck-id)] $$decks :> *deck)
+
+    ;; build a plain map that also includes deck-id
+    (select> [(termval (assoc *deck :deck-id *deck-id))] *deck :> *row)
+
+    ;; POST-AGG: move to origin, then aggregate to a single result
+    (|origin)
+    (aggs/+vec-agg *row :> *decks)))
+
