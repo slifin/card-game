@@ -30,6 +30,17 @@
 (defn list-decks [mgr player-id]
   (foreign-invoke-query (qtop mgr "list-decks") player-id))
 
+(defn create-game! [mgr {:keys [game-id player1-id player2-id]}]
+  (foreign-append! (depot mgr "*game-cmds")
+                   {:op :create-game :game-id game-id :player1-id player1-id :player2-id player2-id}))
+
+(defn play-round! [mgr {:keys [game-id]}]
+  (foreign-append! (depot mgr "*game-cmds")
+                   {:op :play-round :game-id game-id}))
+
+(defn get-game [mgr game-id]
+  (foreign-invoke-query (qtop mgr "get-game") game-id))
+
 
 (comment
   (with-open [ipc (rtest/create-ipc)]
