@@ -1,6 +1,7 @@
 (ns slifin.client
   (:require [com.rpl.rama :as r :refer :all]
-            [com.rpl.rama.test :as rtest]))
+            [com.rpl.rama.test :as rtest]
+            slifin.card-game))
 
 (def MODULE "slifin.card-game/CardGameModule")
 

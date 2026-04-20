@@ -81,7 +81,7 @@
     (local-select> [(keypath *deck-id)] $$decks :> *deck)
 
     ;; build a plain map that also includes deck-id
-    (select> [(termval (assoc *deck :deck-id *deck-id))] *deck :> *row)
+    (assoc *deck :deck-id *deck-id :> *row)
 
     ;; POST-AGG: move to origin, then aggregate to a single result
     (|origin)

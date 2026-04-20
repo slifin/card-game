@@ -2,3 +2,5 @@
 .idea
 .nrepl-port
 .DS_store
+.clj-kondo
+.lsp
