@@ -12,8 +12,8 @@
 ;; ---------------------------------------------------------------------------
 ;; play-local
 ;;
-;; Both roles run in the same process, communicating through Klor's in-memory
-;; simulator. One terminal, one Rama IPC, both "players" take turns at stdin.
+;; All three roles (GM, P1, P2) run in one process via Klor's simulator.
+;; Players are prompted sequentially in the same terminal.
 ;; ---------------------------------------------------------------------------
 (defn play-local []
   (with-open [ipc (rtest/create-ipc)]
@@ -22,33 +22,42 @@
       @(simulate-chor card-game))))
 
 ;; ---------------------------------------------------------------------------
-;; play-as-p1 / play-as-p2
+;; Three-terminal socket transport
 ;;
-;; Two-process socket transport.  Open two terminals in the project root and:
+;;   Terminal 1 (game master):  clojure -M:provided -m slifin.play gm
+;;   Terminal 2 (player 1):     clojure -M:provided -m slifin.play p1
+;;   Terminal 3 (player 2):     clojure -M:provided -m slifin.play p2
 ;;
-;;   Terminal 1:  clojure -M:provided -m slifin.play p1
-;;   Terminal 2:  clojure -M:provided -m slifin.play p2
+;; GM hosts the Rama module in-process, listens on TCP port 7171, and accepts
+;; connections from P1 and P2 (in that order).  Neither player has a Rama
+;; connection — all state management happens at GM.
 ;;
-;; P1 hosts the Rama module in-process and opens a TCP server on port 7171.
-;; P2 connects to that port.  All Rama operations live inside (P1 ...) blocks
-;; in the choreography, so P2 never needs a Rama connection of its own.
+;; Because P1 and P2 send their card choices to GM independently over separate
+;; sockets, both players choose concurrently; neither can see the other's pick.
 ;; ---------------------------------------------------------------------------
-(defn play-as-p1 []
+(defn play-as-gm []
   (with-open [ipc (rtest/create-ipc)]
     (rtest/launch-module! ipc slifin.card-game/CardGameModule {:tasks 4 :threads 2})
     (binding [chor/*ipc* ipc]
       (with-server [srv {:port port}]
-        (println (str "Waiting for Player 2 on port " port "..."))
-        (with-accept [srv p2-conn]
-          (println "Player 2 connected — starting game!\n")
-          (play-role (wrap-sockets {:role 'P1} {'P2 p2-conn})
+        (println (str "Game master ready — waiting for Player 1 on port " port "..."))
+        (with-accept [srv [p1-conn p2-conn]]
+          (println "Both players connected — starting game!")
+          (play-role (wrap-sockets {:role 'GM} {'P1 p1-conn 'P2 p2-conn})
                      card-game))))))
 
+(defn play-as-p1 []
+  (println (str "Connecting to game master on port " port "..."))
+  (with-client [gm-conn {:port port}]
+    (println "Connected.")
+    (play-role (wrap-sockets {:role 'P1} {'GM gm-conn})
+               card-game)))
+
 (defn play-as-p2 []
-  (println (str "Connecting to Player 1 on port " port "..."))
-  (with-client [p1-conn {:port port}]
-    (println "Connected — starting game!\n")
-    (play-role (wrap-sockets {:role 'P2} {'P1 p1-conn})
+  (println (str "Connecting to game master on port " port "..."))
+  (with-client [gm-conn {:port port}]
+    (println "Connected.")
+    (play-role (wrap-sockets {:role 'P2} {'GM gm-conn})
                card-game)))
 
 ;; ---------------------------------------------------------------------------
@@ -57,11 +66,13 @@
 (defn -main [& [mode]]
   (case mode
     "local" (play-local)
+    "gm"    (play-as-gm)
     "p1"    (play-as-p1)
     "p2"    (play-as-p2)
-    (do (println "Usage: clojure -M:provided -m slifin.play [local|p1|p2]")
+    (do (println "Usage: clojure -M:provided -m slifin.play [local|gm|p1|p2]")
         (println)
-        (println "  local  — single process, both roles share one terminal")
-        (println "  p1     — Player 1 (hosts Rama + TCP server on port" (str port ")"))
-        (println "  p2     — Player 2 (connects to Player 1)")
+        (println "  local  — single process, all roles share one terminal")
+        (println "  gm     — game master (hosts Rama + TCP server, connects P1 then P2)")
+        (println "  p1     — Player 1 (connects to game master)")
+        (println "  p2     — Player 2 (connects to game master)")
         (System/exit 1))))
