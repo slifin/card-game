@@ -53,6 +53,36 @@
                               :else nil)))
         updated))))
 
+(defn advance-round-with-choices
+  "Like advance-round but each player plays the card at their chosen index
+  rather than the top of their hand."
+  [game p1-idx p2-idx]
+  (if (not= "in-progress" (:status game))
+    game
+    (let [p1-card  (nth (:player1-hand game) p1-idx)
+          p2-card  (nth (:player2-hand game) p2-idx)
+          p1-val   (card-value p1-card)
+          p2-val   (card-value p2-card)
+          rm       (fn [hand idx] (vec (concat (take idx hand) (drop (inc idx) hand))))
+          updated  (-> game
+                       (update :player1-hand rm p1-idx)
+                       (update :player2-hand rm p2-idx)
+                       (update :round inc)
+                       (cond-> (> p1-val p2-val) (update :player1-score inc))
+                       (cond-> (> p2-val p1-val) (update :player2-score inc)))]
+      (if (empty? (:player1-hand updated))
+        (let [{:keys [player1-score player2-score player1-id player2-id]} updated]
+          (assoc updated
+                 :status    "complete"
+                 :winner-id (cond
+                              (> player1-score player2-score) player1-id
+                              (> player2-score player1-score) player2-id
+                              :else nil)))
+        updated))))
+
+(defn player-hand-key [player-num]
+  (if (= 1 player-num) :player1-hand :player2-hand))
+
 (defmodule CardGameModule
   [setup topologies]
   ;; Depots
@@ -124,7 +154,15 @@
 
                 (case> :play-round)
                 (|hash *game-id)
-                (local-transform> [(keypath *game-id) (term advance-round)] $$games))))
+                (local-transform> [(keypath *game-id) (term advance-round)] $$games)
+
+                (case> :play-cards)
+                (select> [(keypath :p1-card-idx)] *gcmd :> *p1-idx)
+                (select> [(keypath :p2-card-idx)] *gcmd :> *p2-idx)
+                (|hash *game-id)
+                (local-select> [(keypath *game-id)] $$games :> *cur-game)
+                (advance-round-with-choices *cur-game *p1-idx *p2-idx :> *new-game)
+                (local-transform> [(keypath *game-id) (termval *new-game)] $$games))))
 
 
   (<<query-topology topologies "get-player" [*player-id :> *player]
@@ -156,4 +194,11 @@
   (<<query-topology topologies "get-game" [*game-id :> *game]
     (|hash *game-id)
     (local-select> [(keypath *game-id) (nil->val nil)] $$games :> *game)
+    (|origin))
+
+  (<<query-topology topologies "get-hand" [*game-id *player-num :> *hand]
+    (|hash *game-id)
+    (local-select> [(keypath *game-id) (nil->val nil)] $$games :> *game)
+    (player-hand-key *player-num :> *hand-key)
+    (get *game *hand-key :> *hand)
     (|origin)))

@@ -41,6 +41,14 @@
 (defn get-game [mgr game-id]
   (foreign-invoke-query (qtop mgr "get-game") game-id))
 
+(defn play-cards! [mgr {:keys [game-id p1-card-idx p2-card-idx]}]
+  (foreign-append! (depot mgr "*game-cmds")
+                   {:op :play-cards :game-id game-id
+                    :p1-card-idx p1-card-idx :p2-card-idx p2-card-idx}))
+
+(defn get-hand [mgr game-id player-num]
+  (foreign-invoke-query (qtop mgr "get-hand") game-id player-num))
+
 
 (comment
   (with-open [ipc (rtest/create-ipc)]

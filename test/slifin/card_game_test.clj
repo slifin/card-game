@@ -111,5 +111,33 @@
           ;; scores add up to at most 26 (ties score nobody)
           (is (<= (+ (:player1-score game) (:player2-score game)) 26))
           ;; winner is one of the two players, or nil for a tie
-          (is (#{10 20 nil} (:winner-id game))))))))
+          (is (contains? #{10 20 nil} (:winner-id game))))))))
+
+(deftest play-cards-test
+  (testing "playing specific card indices removes those cards from each hand"
+    (with-module
+      (fn [ipc]
+        (client/create-game! ipc {:game-id 5 :player1-id 10 :player2-id 20})
+        (let [before (client/get-game ipc 5)
+              p1-card (nth (:player1-hand before) 2)   ; pick 3rd card (index 2)
+              p2-card (nth (:player2-hand before) 0)]  ; pick 1st card (index 0)
+          (client/play-cards! ipc {:game-id 5 :p1-card-idx 2 :p2-card-idx 0})
+          (let [after (client/get-game ipc 5)]
+            (is (= 1 (:round after)))
+            (is (= 25 (count (:player1-hand after))))
+            (is (= 25 (count (:player2-hand after))))
+            ;; chosen cards are gone from hands
+            (is (not (some #{p1-card} (:player1-hand after))))
+            (is (not (some #{p2-card} (:player2-hand after)))))))))
+
+  (testing "get-hand returns only that player's cards"
+    (with-module
+      (fn [ipc]
+        (client/create-game! ipc {:game-id 6 :player1-id 10 :player2-id 20})
+        (let [game    (client/get-game ipc 6)
+              p1-hand (client/get-hand ipc 6 1)
+              p2-hand (client/get-hand ipc 6 2)]
+          (is (= (:player1-hand game) p1-hand))
+          (is (= (:player2-hand game) p2-hand))
+          (is (empty? (clojure.set/intersection (set p1-hand) (set p2-hand)))))))))
 
